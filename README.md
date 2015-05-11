@@ -1,11 +1,11 @@
-# Modulware
-## … helps you to organize plugins via folders in your webapplication
+# Modulware - Middleware for modules
+## … helps you to organize modular stuff via subfolders in your webapplication
 
-Here module(s) **are not** `node_modules` :) Modules are folders including code, config and routes for your webapplication, to keep it modular and a bit more organized.
+Wording attention: Here module(s) **are not** the libraries you usually find in `node_modules`! In our case modules are folders including code, config, routes and translation data for your webapplication. They should keep your project more modular and organized… you could also regard them as plugins.
 
 ## Example
 
-A submodule could be:
+A submodule (`mysubmodule`) could look like:
 
 ```
 + project/
@@ -13,7 +13,10 @@ A submodule could be:
 ┠─ server.js
 ┠─ package.json
 ┃
-┖─ + mysubmodulemodule/
+
+…
+
+┖─ + mysubmodule/
    ┃
    ┠─ routes.yml
    ┠─ config.yml
@@ -34,6 +37,8 @@ routes:
   'POST:/contact/:id([0-9]+)': contact.post
 ```
 
+[Take a deeper look here](https://github.com/pstaender/modulware/tree/master/examples/mymodule)…
+
 You can use `js` or `coffeescript` files, depending on your compiler; they are included by the js `required` method.
 
 Since it's a middleware, you have to combine it with frameworks. For now it work exclusively with `expressjs`:
@@ -47,6 +52,7 @@ modulware = require('modulware')()
 # options = { defaultHTTPMethod: 'GET'}
 modulware.applyMethods(app)
 app.locals.config = modulware.getConfig()
+translation = modulware.getI18N()
 
 server = app.listen 3000, ->
   console.log('server is running')
