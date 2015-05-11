@@ -34,9 +34,26 @@ routes:
   'POST:/contact/:id([0-9]+)': contact.post
 ```
 
+You can use `js` or `coffeescript` files, depending on your compiler; they are included by the js `required` method.
+
+Since it's a middleware, you have to combine it with frameworks. For now it work exclusively with `expressjs`:
+
+```coffeescript
+express = require('express')
+app = express()
+
+modulware = require('modulware')()
+# or with options if you want to override the default settings (see: https://github.com/pstaender/modulware/blob/master/modulware.coffee#L7)
+# options = { defaultHTTPMethod: 'GET'}
+modulware.applyByMethods(app)
+
+server = app.listen 3000, ->
+  console.log('server is running')
+```
+
 ## Development status
 
-Early alpha, not ready for production. Tested against the latest `expressjs` framework.
+Early alpha, not ready for production. Tested against the latest `expressjs` framework. Not on npm, yet.
 
 ## Tests
 
