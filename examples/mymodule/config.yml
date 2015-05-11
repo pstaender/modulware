@@ -1,0 +1,9 @@
+# config files may contain app wide values …
+defaultPictureFormat: jpg
+# … or modul specific config values
+mymodul:
+  version: 0.1
+  name: mymoduel
+  author: me@home.com
+# all values will be merged to one big config file
+# and are accessible via `modulware.getConfig()`

@@ -45,7 +45,8 @@ app = express()
 modulware = require('modulware')()
 # or with options if you want to override the default settings (see: https://github.com/pstaender/modulware/blob/master/modulware.coffee#L7)
 # options = { defaultHTTPMethod: 'GET'}
-modulware.applyByMethods(app)
+modulware.applyMethods(app)
+app.locals.config = modulware.getConfig()
 
 server = app.listen 3000, ->
   console.log('server is running')

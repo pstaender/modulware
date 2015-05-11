@@ -1,0 +1,5 @@
+# routes enable routing from url to code files and their methods 
+routes:
+  '/': frontpage.index
+  'GET:/contact/:id([0-9]+)': contact.get
+  'POST:/contact/:id([0-9]+)': contact.post
