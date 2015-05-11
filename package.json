@@ -1,0 +1,9 @@
+{
+  "description": "modulware",
+  "author": "Philipp Staender <philipp.staender@gmail.com>",
+  "dependencies": {
+    "glob": "^5.0.5",
+    "js-yaml": "^3.3.0",
+    "underscore": "^1.8.3"
+  }
+}
