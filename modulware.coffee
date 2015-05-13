@@ -3,6 +3,7 @@ glob = require 'glob'
 fs   = require 'fs'
 path = require 'path'
 _    = require 'underscore'
+_.mixin(require('underscore.nested'))
 
 defaultConfig = {
   configFilePattern: 'config.@(yml|yaml)'
@@ -10,6 +11,7 @@ defaultConfig = {
   codeFilePattern: 'code/**/*.@(coffee|js)'
   i18nFilePattern: 'i18n/**/*.@(yml|yaml)'
   viewFolderPattern: 'views/*.@(jade)'
+  templateFolder: 'templates/**/*.@(jade)'
   defaultHTTPMethod: '*' # can be get|put|post|delete|patch|all|*(is for all)
   debug: true
   encoding: 'utf8'
@@ -17,7 +19,7 @@ defaultConfig = {
   basedir: null # with `null` => process.cwd()
   configOnLocals: true
   defaultMountpoint: '/' # is able to contain a $module variable, e.g. '/$module'
-  localConfigKey: 'config'
+  localConfigKey: 'settings.config'
   expressjs:
     set:
       'view engine': 'jade'
@@ -44,7 +46,7 @@ exports.applyOnExpress = (instanceMethod) ->
   return @log.error('instanceMethod argument needs to be a function') if typeof instanceMethod isnt 'function'
   exports.buildModuleIndex()
   app = exports._applyOnInstanceMethod(instanceMethod)
-  app.locals.settings[_options.localConfigKey] = @getConfig() if _options.configOnLocals
+  _.setNested(app.locals, _options.localConfigKey, @getConfig()) if _options.configOnLocals
   return app
 
 exports.log = {
@@ -167,6 +169,8 @@ exports._applyOnInstanceMethod = (instanceMethod) ->
   
   mountToApp = (Boolean) typeof instanceMethod is 'function' and instanceMethod?.name is 'createApplication'
 
+  templates = if options.templateFolder then glob.sync(options.templateFolder) else null
+
   if mountToApp
     mainApp = instanceMethod()
   else
@@ -182,6 +186,8 @@ exports._applyOnInstanceMethod = (instanceMethod) ->
       app = instanceMethod()
       for settingKey of options.expressjs?.set
         app.set(settingKey, options.expressjs.set[settingKey])
+    
+    views = []
 
     routes = modules[moduleName].routes.routes
     codeFiles = {}
@@ -220,13 +226,18 @@ exports._applyOnInstanceMethod = (instanceMethod) ->
 
     # apply views
     viewFiles = glob.sync("#{moduleName}/#{options.viewFolderPattern}")
-    app.set('views',path.dirname(viewFiles[0])) if viewFiles?.length > 0
+    views.push(path.dirname(viewFiles[0])) if viewFiles?.length > 0
+    #app.set('views',path.dirname(viewFiles[0])) if viewFiles?.length > 0
 
     # mount to (parent/main) app
     if mountToApp
       mountpoint = if @getConfig()[moduleName]?.mountpoint then @getConfig()[moduleName]?.mountpoint else options.defaultMountpoint
       mountpoint = mountpoint.replace(/\$module([^\w]+.*|)$/g, moduleName+'$1')
       mainApp.use(mountpoint, app)
+
+    views.push(path.dirname(templates[0])) if templates?.length > 0
+
+    app.set('views', views)
 
   return if mountToApp
     mainApp
