@@ -17,8 +17,10 @@ defaultConfig = {
   basedir: null # with `null` => process.cwd()
   configOnLocals: true
   defaultMountpoint: '/' # is able to contain a $module variable, e.g. '/$module'
-  expressjsSettings:
-    'view engine': 'jade'
+  localConfigKey: 'config'
+  expressjs:
+    set:
+      'view engine': 'jade'
 }
 
 _options = {}
@@ -42,7 +44,7 @@ exports.applyOnExpress = (instanceMethod) ->
   return @log.error('instanceMethod argument needs to be a function') if typeof instanceMethod isnt 'function'
   exports.buildModuleIndex()
   app = exports._applyOnInstanceMethod(instanceMethod)
-  app.locals.config = @getConfig() if _options.configOnLocals
+  app.locals.settings[_options.localConfigKey] = @getConfig() if _options.configOnLocals
   return app
 
 exports.log = {
@@ -174,13 +176,12 @@ exports._applyOnInstanceMethod = (instanceMethod) ->
   # in order of `before:` and `after:`
 
   for moduleName in _sortedRoutes
-
     # if we deal with express instance method
     # we create a new express / app instance for each module
     if mountToApp
       app = instanceMethod()
-      for settingKey of options.expressjsSettings
-        app.set(settingKey, options.expressjsSettings[settingKey])
+      for settingKey of options.expressjs?.set
+        app.set(settingKey, options.expressjs.set[settingKey])
 
     routes = modules[moduleName].routes.routes
     codeFiles = {}
