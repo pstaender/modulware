@@ -9,11 +9,16 @@ defaultConfig = {
   routesFile: 'routes.yml'
   codeFilePattern: 'code/**/*.@(coffee|js)'
   i18nFilePattern: 'i18n/**/*.@(yml|yaml)'
+  viewFolderPattern: 'views/*.@(jade)'
   defaultHTTPMethod: '*' # can be get|put|post|delete|patch|all|*(is for all)
   debug: true
   encoding: 'utf8'
   moduleNamePattern: '^[a-zA-Z\\_\\-0-9]+$'
-  basedir: null
+  basedir: null # with `null` => process.cwd()
+  configOnLocals: true
+  defaultMountpoint: '/' # is able to contain a $module variable, e.g. '/$module'
+  expressjsSettings:
+    'view engine': 'jade'
 }
 
 _options = {}
@@ -30,14 +35,15 @@ module.exports = (options = {}, app = null) ->
 exports.setOptions = (options) ->
   # apply options over default options
   _.extendOwn(_options, defaultConfig, options)
-  unless _options.basedir
-    _options.basedir = path.dirname(process.argv[1])
+  _options.basedir ?= process.cwd()
   _options
 
-exports.applyMethods = (app) ->
-  return @log.error('app argument needs to be a function') if typeof app isnt 'function'
+exports.applyOnExpress = (instanceMethod) ->
+  return @log.error('instanceMethod argument needs to be a function') if typeof instanceMethod isnt 'function'
   exports.buildModuleIndex()
-  exports.applyOnApp(app)
+  app = exports._applyOnInstanceMethod(instanceMethod)
+  app.locals.config = @getConfig() if _options.configOnLocals
+  return app
 
 exports.log = {
   error:      ->
@@ -145,7 +151,7 @@ exports._sortRoutes = (sortedRoutes) ->
   
   sortedRoutes = before.concat(sortedRoutes.concat(after))
 
-exports.getConfig = (byReference = false) ->
+exports.getConfig = (byReference = true) ->
   if byReference then _config else _.extend({},_config)
 
 exports.getI18N = (byReference = false) ->
@@ -153,41 +159,75 @@ exports.getI18N = (byReference = false) ->
 
 exports.getTranslation = exports.getI18N
 
-exports.applyOnApp = (app) ->
+exports._applyOnInstanceMethod = (instanceMethod) ->
   modules = _modules
   options  = _options
-  for route in _sortedRoutes
-    routes = modules[route].routes.routes
+  
+  mountToApp = (Boolean) typeof instanceMethod is 'function' and instanceMethod?.name is 'createApplication'
+
+  if mountToApp
+    mainApp = instanceMethod()
+  else
+    app = instanceMethod
+
+  # now all routes will be applied to the app
+  # in order of `before:` and `after:`
+
+  for moduleName in _sortedRoutes
+
+    # if we deal with express instance method
+    # we create a new express / app instance for each module
+    if mountToApp
+      app = instanceMethod()
+      for settingKey of options.expressjsSettings
+        app.set(settingKey, options.expressjsSettings[settingKey])
+
+    routes = modules[moduleName].routes.routes
     codeFiles = {}
-    for file in modules[route].codeFiles
+    for file in modules[moduleName].codeFiles
       #codeFiles[]
       key = file.replace(/^.*\/([^\\]+?)\.[^\.]+?$/, '$1')
       if codeFiles[key]
         throw Error("'#{file}' is an ambigious code file to '#{codeFiles[key]}'; files with identical name are not allowed")
       codeFiles[key] = file
 
-    routes = modules[route].routes.routes
+    routes = modules[moduleName].routes.routes
 
+    for urlString, action of routes
+      # you can have multiple urls (comma seperated), like
+      # GET:/home,POST:/home
+      urls = urlString.split(',')
+      for url in urls
+        urlParts = url.match(/^((post|put|get|delete|patch|all|\*)\:)*(.+)$/i)
+        if urlParts
+          # e.g. POST:/about
+          httpMethod = urlParts[2]?.toLowerCase() or 'all'
+          httpMethod = 'all' if httpMethod is options.defaultHTTPMethod
+          urlRule = urlParts[3]
+          # e.g. index.about (index -> code file, about -> method)
+          actionParts = action.match(/^([^\.]+)\.([^\.]+)/)
+          codeFile = actionParts[1]
+          method = actionParts[2]
+          if actionParts and codeFile and method
+            # abort if code file doesnt exists
+            throw Error("Cannot find file '#{codeFile}' for route '#{url}' in module '#{moduleName}'") unless codeFiles[codeFile]
+            if method
+              try
+                app[httpMethod](urlRule, require(options.basedir+'/'+codeFiles[codeFile])[method])
+              catch e
+                throw Error("Cannot find method '#{method}' in file '#{codeFile}' for route '#{url}' in module '#{moduleName}'")
 
+    # apply views
+    viewFiles = glob.sync("#{moduleName}/#{options.viewFolderPattern}")
+    app.set('views',path.dirname(viewFiles[0])) if viewFiles?.length > 0
 
-    for url, action of routes
-      urlParts = url.match(/^((post|put|get|delete|patch|all|\*)\:)*(.+)$/i)
-      if urlParts
-        # e.g. POST:/about
-        httpMethod = urlParts[2]?.toLowerCase() or 'all'
-        httpMethod = 'all' if httpMethod is options.defaultHTTPMethod
-        urlRule = urlParts[3]
-        # e.g. index.about (index -> code file, about -> method)
-        actionParts = action.match(/^([^\.]+)\.([^\.]+)/)
-        codeFile = actionParts[1]
-        method = actionParts[2]
-        if actionParts and codeFile and method
-          # abort if code file doesnt exists
-          throw Error("Cannot find file '#{codeFile}' for route '#{url}' in module '#{route}'") unless codeFiles[codeFile]
-          if method
-            try
-              app[httpMethod](urlRule, require(options.basedir+'/'+codeFiles[codeFile])[method])
-            catch e
-              throw Error("Cannot find method '#{method}' in file '#{codeFile}' for route '#{url}' in module '#{route}'")
+    # mount to (parent/main) app
+    if mountToApp
+      mountpoint = if @getConfig()[moduleName]?.mountpoint then @getConfig()[moduleName]?.mountpoint else options.defaultMountpoint
+      mountpoint = mountpoint.replace(/\$module([^\w]+.*|)$/g, moduleName+'$1')
+      mainApp.use(mountpoint, app)
 
-  return app
+  return if mountToApp
+    mainApp
+  else
+    app
