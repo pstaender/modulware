@@ -10,8 +10,9 @@ defaultConfig = {
   routesFile: 'routes.yml'
   codeFilePattern: 'code/**/*.@(coffee|js)'
   i18nFilePattern: 'i18n/**/*.@(yml|yaml)'
-  viewFolderPattern: 'views/*.@(jade)'
-  templateFolder: 'templates/**/*.@(jade)'
+  viewFolderPattern: 'views/'#'views/*.@(jade)'
+  themeFolder: 'themes'
+  theme: ''
   defaultHTTPMethod: '*' # can be get|put|post|delete|patch|all|*(is for all)
   debug: true
   encoding: 'utf8'
@@ -30,6 +31,15 @@ _config = {}
 _modules = {}
 _i18n = {}
 _sortedRoutes = []
+
+exports._replaceVariableHolder = (haystack, needle, replacement) ->
+  haystack.replace(new RegExp("\\$#{needle}([^\\w]+.*|)$", "g"), replacement+'$1')
+##replace(/\$module([^\w]+.*|)$/g, moduleName+'$1')
+exports._replaceModuleVariable = (str, moduleName, needle = 'module') ->
+  @_replaceVariableHolder(str, needle, moduleName)
+exports._replaceThemeVariable = (str, moduleName, needle = 'theme') ->
+  @_replaceVariableHolder(str, needle, moduleName)
+
 
 module.exports = (options = {}, app = null) ->
   exports.setOptions(options)
@@ -169,7 +179,14 @@ exports._applyOnInstanceMethod = (instanceMethod) ->
   
   mountToApp = (Boolean) typeof instanceMethod is 'function' and instanceMethod?.name is 'createApplication'
 
-  templates = if options.templateFolder then glob.sync(options.templateFolder) else null
+  themeTemplates = []
+  if options.themeFolder
+    theme = options.theme || ''
+    theme = theme.replace(/[\\//]+$/,'').replace(/^[\\//]+/,'')
+    themeDir = "#{options.themeFolder.replace(/[\\//]+$/,'')}/#{theme}"
+    themeTemplates = glob.sync(themeDir)
+
+  #templates = if options.themeFolder then glob.sync("#{path.dirname(options.themeFolder)}/#{options.theme}") else null
 
   if mountToApp
     mainApp = instanceMethod()
@@ -226,16 +243,17 @@ exports._applyOnInstanceMethod = (instanceMethod) ->
 
     # apply views
     viewFiles = glob.sync("#{moduleName}/#{options.viewFolderPattern}")
-    views.push(path.dirname(viewFiles[0])) if viewFiles?.length > 0
+    views.push(viewFiles[0]) if viewFiles?.length > 0
+
     #app.set('views',path.dirname(viewFiles[0])) if viewFiles?.length > 0
 
     # mount to (parent/main) app
     if mountToApp
       mountpoint = if @getConfig()[moduleName]?.mountpoint then @getConfig()[moduleName]?.mountpoint else options.defaultMountpoint
-      mountpoint = mountpoint.replace(/\$module([^\w]+.*|)$/g, moduleName+'$1')
+      mountpoint = @_replaceVariableHolder(mountpoint, moduleName)
       mainApp.use(mountpoint, app)
 
-    views.push(path.dirname(templates[0])) if templates?.length > 0
+    views.push(themeTemplates[0]) if themeTemplates?.length > 0
 
     app.set('views', views)
 
