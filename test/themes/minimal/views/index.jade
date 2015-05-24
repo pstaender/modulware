@@ -1,0 +1,10 @@
+doctype html
+html(lang="en")
+  head
+    title!= title
+  style
+    include ../css/layout.css
+  body
+    h1 #{title}
+    h2 #{settings.config.themeDir()}
+    pre.content!= content

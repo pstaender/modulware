@@ -1,0 +1,9 @@
+doctype html
+html(lang="en")
+  head
+    title!= title
+  body
+    h1!= title
+    #container.col
+      p This is a test page by
+      p!= settings.config.mymodule.author

@@ -1,0 +1,3 @@
+# routes enable routing from url to code files and their methods 
+routes:
+  '/test': test.index

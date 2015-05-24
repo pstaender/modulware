@@ -5,259 +5,324 @@ path = require 'path'
 _    = require 'underscore'
 _.mixin(require('underscore.nested'))
 
-defaultConfig = {
-  configFilePattern: 'config.@(yml|yaml)'
-  routesFile: 'routes.yml'
-  codeFilePattern: 'code/**/*.@(coffee|js)'
-  i18nFilePattern: 'i18n/**/*.@(yml|yaml)'
-  viewFolderPattern: 'views/'#'views/*.@(jade)'
-  themeFolder: 'themes'
-  theme: ''
-  defaultHTTPMethod: '*' # can be get|put|post|delete|patch|all|*(is for all)
-  debug: true
-  encoding: 'utf8'
-  moduleNamePattern: '^[a-zA-Z\\_\\-0-9]+$'
-  basedir: null # with `null` => process.cwd()
-  configOnLocals: true
-  defaultMountpoint: '/' # is able to contain a $module variable, e.g. '/$module'
-  localConfigKey: 'settings.config'
-  expressjs:
-    set:
-      'view engine': 'jade'
-}
+doesFileExists = fs.lstatSync
 
-_options = {}
-_config = {}
-_modules = {}
-_i18n = {}
-_sortedRoutes = []
+class Modulware
 
-exports._replaceVariableHolder = (haystack, needle, replacement) ->
-  haystack.replace(new RegExp("\\$#{needle}([^\\w]+.*|)$", "g"), replacement+'$1')
-##replace(/\$module([^\w]+.*|)$/g, moduleName+'$1')
-exports._replaceModuleVariable = (str, moduleName, needle = 'module') ->
-  @_replaceVariableHolder(str, needle, moduleName)
-exports._replaceThemeVariable = (str, moduleName, needle = 'theme') ->
-  @_replaceVariableHolder(str, needle, moduleName)
+  config: {
+    themeDir: -> @options.themeDir
+  }
 
+  options        : {}
+  modules        : {}
+  i18n           : {}
+  sortedRoutes   : []
+  globOptions    : {}
 
-module.exports = (options = {}, app = null) ->
-  exports.setOptions(options)
-  exports.buildIndexByModules() if typeof app is 'function'
-  exports
+  options: {
+    configFilePattern: 'config.@(yml|yaml)'
+    routesFile: 'routes.yml'
+    codeFilePattern: 'code/**/*.@(coffee|js)'
+    i18nFilePattern: 'i18n/**/*.@(yml|yaml)'
+    viewFolderPattern: 'views/'#'views/*.@(jade)'
+    themesFolder: 'themes'
+    themeDir: ''
+    theme: ''
+    defaultHTTPMethod: '*' # can be get|put|post|delete|patch|all|*(is for all)
+    debug: true
+    encoding: 'utf8'
+    moduleNamePattern: '^[a-zA-Z\\_\\-0-9]+$'
+    basedir: null # with `null` => process.cwd()
+    configOnLocals: true
+    optionsOnLocals: true
+    defaultMountpoint: '/' # is able to contain a $module variable, e.g. '/$module'
+    localConfigKey: 'settings.config'
+    localOptionKey: 'settings.options'
+    routesYMLMandatory: true
+    verbosity: 0
+    expressjs:
+      set:
+        'view engine': 'jade'
+  }
 
-exports.setOptions = (options) ->
-  # apply options over default options
-  _.extendOwn(_options, defaultConfig, options)
-  _options.basedir ?= process.cwd()
-  _options
+  constructor: (options = {}, app = null) ->
+    if typeof options is 'function'
+      app = options
+      options = {}
+    @options        = _.extend({}, @options, options)
+    @modules        = _.extend({}, @module)
+    @i18n           = _.extend({}, @i18n)
+    @sortedRoutes   = _.extend({}, @sortedRoutes)
+    @globOptions    = _.extend({}, @globOptions)
+    @setOptions(options)
+    @applyOnExpress(app) if typeof app is 'function'
+    @
 
-exports.applyOnExpress = (instanceMethod) ->
-  return @log.error('instanceMethod argument needs to be a function') if typeof instanceMethod isnt 'function'
-  exports.buildModuleIndex()
-  app = exports._applyOnInstanceMethod(instanceMethod)
-  _.setNested(app.locals, _options.localConfigKey, @getConfig()) if _options.configOnLocals
-  return app
+  _replaceVariableHolder: (haystack, needle, replacement) ->
+    haystack.replace(new RegExp("\\$#{needle}([^\\w]+.*|)$", "g"), replacement+'$1')
+  _replaceModuleVariable: (str, moduleName, needle = 'module') ->
+    @_replaceVariableHolder(str, needle, moduleName)
+  _replaceThemeVariable: (str, moduleName, needle = 'theme') ->
+    @_replaceVariableHolder(str, needle, moduleName)
 
-exports.log = {
-  error:      ->
-    args = Array.prototype.slice.call(arguments)
-    args.unshift('[error]')
-    console.error.apply(console, args)
-  fatalError: (msg) ->
-    args = Array.prototype.slice.call(arguments)
-    args.unshift('[fatalError]')
-    console.error.apply(console, args)
-    throw Error(msg)
-  verbose:    ->
-    return unless _options.debug
-    args = Array.prototype.slice.call(arguments)
-    args.unshift('[verbose]')
-    console.log.apply(console, args)
-  log:        -> console.log.apply(console, arguments)
-  debug:      ->
-    return unless _options.debug
-    args = Array.prototype.slice.call(arguments)
-    args.unshift('[debug]')
-    console.error.apply(console, args)
-}
+  getOptions: -> @options
 
-exports.buildModuleIndex = (force = true) ->
-  options = _options
-  # index all modules. i.e. all folders that contains a config.yml file
-  # pattern is taken from coreConfig
-  configFiles = glob.sync("*/#{options.configFilePattern}")
-  @_indexModules(configFiles)
+  setOptions: (options) ->
+    # apply options over default options
+    _.extendOwn(@options, {}, @options, options)
+    @options.basedir ?= process.cwd()
+    @globOptions = {
+      cwd: @options.basedir
+    }
+    @options
 
-exports._indexModules = (configFiles) ->
-  options = _options
-  modules = {}
-  sortedRoutes = []
+  getModules: -> @modules
 
-  moduleNamePattern = new RegExp(options.moduleNamePattern)
+  applyOnExpress: (instanceMethod) ->
+    return @logError('instanceMethod argument needs to be a function') if typeof instanceMethod isnt 'function'
+    @buildModuleIndex()
+    app = @_applyOnInstanceMethod(instanceMethod)
+    _.setNested(app.locals, @options.localConfigKey, @getConfig()) if @options.configOnLocals
+    _.setNested(app.locals, @options.localOptionKey, @getOptions()) if @options.optionsOnLocals
+    return app
 
-  for configFile in configFiles
-    # TODO: split into methods
-    moduleName = configFile.replace(/^(.+?)\/.+$/, '$1')
-    @log.verbose "Found module '#{moduleName}'"
-    unless moduleNamePattern.test(moduleName)
-      @log.verbose("Skipping module '#{moduleName}' because it doesn't fetch the name pattern /#{options.moduleNamePattern}/")
-      continue
-    routesFilename = "#{moduleName}/#{options.routesFile}"
-    # load config.yml
-    moduleConfig = yaml.safeLoad(fs.readFileSync(configFile, options.encoding))
-    _config = _.extend(_config, moduleConfig)
-    moduleRoutes = null
-    
-    try
-      fs.lstatSync(routesFilename)
-    catch e
-      moduleRoutes = {}
-
-    # load routes.yml
-    moduleRoutes = yaml.safeLoad(fs.readFileSync(routesFilename, options.encoding)) unless moduleRoutes
-    continue unless moduleRoutes?.routes
-    modules[moduleName] =
-      routes: moduleRoutes
-      codeFiles: glob.sync("#{moduleName}/#{options.codeFilePattern}")
- 
-    # first we do not sort and add all modules in order from glob
-    # sorting will be done in `_sortRoutes`
-
-    # load i18n yml
-    i18nFiles = glob.sync("#{moduleName}/#{options.i18nFilePattern}")
-    for i18nFile in i18nFiles
-      translations = yaml.safeLoad(fs.readFileSync(i18nFile, options.encoding))
-      _i18n = _.extend(_i18n, translations)
-    sortedRoutes.push(moduleName)
-  _modules = modules
-
-  _sortedRoutes = @_sortRoutes(sortedRoutes)
-
-
-exports._sortRoutes = (sortedRoutes) ->
-  before = []
-  after = []
-  modules = _modules
-  for moduleName of modules
-    route = modules[moduleName].routes
-    if route.after
-      sortedRoutes.splice(sortedRoutes.indexOf(moduleName), 1) # remove element
-      if route.after is '*'
-        after.push(moduleName)
-      else if sortedRoutes.indexOf(route.after) >= 0
-
-        sortedRoutes.splice(sortedRoutes.indexOf(route.after)+1, 0, moduleName)
-      else if after.indexOf(route.after) >= 0
-        after.splice(sortedRoutes.indexOf(route.after)+1, 0, moduleName)
-      else
-        @log.verbose "After-module #{route.after} doesn't exists, ignoring"
-    if route.before
-      sortedRoutes.splice(sortedRoutes.indexOf(moduleName), 1) # remove element
-      if route.before is '*'
-        before.unshift(moduleName)
-      else if sortedRoutes.indexOf(routs.before) >= 0
-        sortedRoutes.splice(sortedRoutes.indexOf(route.before), 0, moduleName)
-      else if before.indexOf(route.before) >= 0
-        before.splice(sortedRoutes.indexOf(route.before)-1, 0, moduleName)
-      else
-        @log.verbose "Before-module #{route.before} doesn't exists, ignoring"
   
-  sortedRoutes = before.concat(sortedRoutes.concat(after))
+  logError:      ->
+      args = Array.prototype.slice.call(arguments)
+      args.unshift('[error]')
+      console.error.apply(console, args)
+  logFatalError: (msg) ->
+      args = Array.prototype.slice.call(arguments)
+      args.unshift('[fatalError]')
+      console.error.apply(console, args)
+      throw Error(msg)
+  logVerbose:    ->
+      return unless /verbose/i.test(@options.verbosity)
+      args = Array.prototype.slice.call(arguments)
+      args.unshift('[verbose]')
+      console.log.apply(console, args)
+  log:           -> console.log.apply(console, arguments)
+  logDebug:      ->
+      return unless /debug/i.test(@options.verbosity)
+      args = Array.prototype.slice.call(arguments)
+      args.unshift('[debug]')
+      console.error.apply(console, args)
 
-exports.getConfig = (byReference = true) ->
-  if byReference then _config else _.extend({},_config)
+  buildModuleIndex: (force = true) ->
+    options = @options
+    # index all modules. i.e. all folders that contains a config.yml file
+    # pattern is taken from coreConfig
+    configFiles = glob.sync("*/#{options.configFilePattern}", @globOptions)
+    @_indexModules(configFiles)
 
-exports.getI18N = (byReference = false) ->
-  if byReference then _i18n else _.extend({},_i18n)
+  _indexModules: (configFiles) ->
+    options = @options
+    modules = {}
+    sortedRoutes = []
 
-exports.getTranslation = exports.getI18N
+    moduleNamePattern = new RegExp(options.moduleNamePattern)
 
-exports._applyOnInstanceMethod = (instanceMethod) ->
-  modules = _modules
-  options  = _options
-  
-  mountToApp = (Boolean) typeof instanceMethod is 'function' and instanceMethod?.name is 'createApplication'
+    # index modules + sort out "invalid" modules (i.e. neither containing config.yml nor routes.yml)
+    for configFile in configFiles
+      # TODO: split into methods
+      moduleName = configFile.replace(/^(.+?)\/.+$/, '$1')
+      unless moduleNamePattern.test(moduleName)
+        @logVerbose("Skipping module '#{moduleName}' because it doesn't fetch the name pattern /#{options.moduleNamePattern}/")
+        continue
+      if options.routesYMLMandatory
+        path = @makePathAbsolute("#{moduleName}/#{options.routesFile}")
+        try
+          doesFileExists(path)
+        catch e
+          @logVerbose("Skipping module '#{moduleName}' because it doesn't contain a '#{options.routesFile}'") # " ('#{path}') ")
+          continue
+      
+      @logVerbose "Added module '#{moduleName}'"
+      
+      modules[moduleName] =
+        configFile: configFile
 
-  themeTemplates = []
-  if options.themeFolder
-    theme = options.theme || ''
-    theme = theme.replace(/[\\//]+$/,'').replace(/^[\\//]+/,'')
-    themeDir = "#{options.themeFolder.replace(/[\\//]+$/,'')}/#{theme}"
-    themeTemplates = glob.sync(themeDir)
+    modules = @_indexConfigurationFilesOfModules(modules)
+    for moduleName in modules
+      sortedRoutes.push(moduleName)
+    # sort routes
+    @sortedRoutes = @_sortRoutes(sortedRoutes, modules)
 
-  #templates = if options.themeFolder then glob.sync("#{path.dirname(options.themeFolder)}/#{options.theme}") else null
+  makePathAbsolute: (path) ->
+    "#{@options.basedir}/#{path?.replace(/^[\\\/]+/,'')}"
 
-  if mountToApp
-    mainApp = instanceMethod()
-  else
-    app = instanceMethod
+  _indexConfigurationFilesOfModules: (modules) ->
+    options = @options
+    # read config
+    for moduleName of modules
+      module = modules[moduleName]
 
-  # now all routes will be applied to the app
-  # in order of `before:` and `after:`
+      # load config.yml
+      moduleConfig = yaml.safeLoad(fs.readFileSync(@makePathAbsolute(module.configFile), options.encoding))
+      _config = _.extend(@config, moduleConfig)
+      
+      moduleRoutes = null
+    # read routes
+    for moduleName of modules
+      module = modules[moduleName]
+      routesFilename = "#{moduleName}/#{options.routesFile}"
 
-  for moduleName in _sortedRoutes
-    # if we deal with express instance method
-    # we create a new express / app instance for each module
-    if mountToApp
-      app = instanceMethod()
-      for settingKey of options.expressjs?.set
-        app.set(settingKey, options.expressjs.set[settingKey])
+      try
+        doesFileExists(@makePathAbsolute(routesFilename))
+      catch e
+        moduleRoutes = {}
+
+      # load routes.yml
+      modules[moduleName].routing = {}
+      moduleRoutes = yaml.safeLoad(fs.readFileSync(@makePathAbsolute(routesFilename), options.encoding))# unless moduleRoutes
+      #continue unless moduleRoutes?.routes
+      modules[moduleName].routing = moduleRoutes or {}
+      modules[moduleName].codeFiles = glob.sync("#{moduleName}/#{options.codeFilePattern}", @globOptions)
+      # first we do not sort and add all modules in order from glob
+      # sorting will be done in `_sortRoutes`
+    # read i18n translation files
+    for moduleName of modules
+      module = modules[moduleName]
+      # load i18n yml
+      i18nFiles = glob.sync("#{moduleName}/#{options.i18nFilePattern}", @globOptions)
+      for i18nFile in i18nFiles
+        translations = yaml.safeLoad(fs.readFileSync(@makePathAbsolute(i18nFile), options.encoding))
+        @i18n = _.extend(@i18n, translations)
+
+    @modules = modules
+
+
+  _sortRoutes: (sortedRoutes, modules) ->
+    before = []
+    after = []
+    for moduleName of modules
+      route = modules[moduleName].routing
+      if route.after
+        sortedRoutes.splice(sortedRoutes.indexOf(moduleName), 1) # remove element
+        if route.after is '*'
+          after.push(moduleName)
+        else if sortedRoutes.indexOf(route.after) >= 0
+
+          sortedRoutes.splice(sortedRoutes.indexOf(route.after)+1, 0, moduleName)
+        else if after.indexOf(route.after) >= 0
+          after.splice(sortedRoutes.indexOf(route.after)+1, 0, moduleName)
+        else
+          @logVerbose "After-module #{route.after} doesn't exists, ignoring"
+      if route.before
+        sortedRoutes.splice(sortedRoutes.indexOf(moduleName), 1) # remove element
+        if route.before is '*'
+          before.unshift(moduleName)
+        else if sortedRoutes.indexOf(routs.before) >= 0
+          sortedRoutes.splice(sortedRoutes.indexOf(route.before), 0, moduleName)
+        else if before.indexOf(route.before) >= 0
+          before.splice(sortedRoutes.indexOf(route.before)-1, 0, moduleName)
+        else
+          @logVerbose "Before-module #{route.before} doesn't exists, ignoring"
+      else
+        sortedRoutes.push(moduleName)
+
+    return before.concat(sortedRoutes.concat(after))
+
+  getConfig: (byReference = true) ->
+    if byReference then @config else _.extend({}, @config)
+
+  getI18N: (byReference = false) ->
+    if byReference then @i18n else _.extend({}, @i18n)
+
+  getTranslation: @getI18N
+
+  _applyOnInstanceMethod: (instanceMethod) ->
+    modules = @modules
+    options  = @options
     
-    views = []
+    mountToApp = (Boolean) typeof instanceMethod is 'function' and instanceMethod?.name is 'createApplication'
 
-    routes = modules[moduleName].routes.routes
-    codeFiles = {}
-    for file in modules[moduleName].codeFiles
-      #codeFiles[]
-      key = file.replace(/^.*\/([^\\]+?)\.[^\.]+?$/, '$1')
-      if codeFiles[key]
-        throw Error("'#{file}' is an ambigious code file to '#{codeFiles[key]}'; files with identical name are not allowed")
-      codeFiles[key] = file
+    themeTemplates = []
+    if options.themesFolder
+      theme = options.theme || ''
+      theme = theme.replace(/[\\//]+$/,'').replace(/^[\\//]+/,'')
+      options.themeDir = "#{options.themesFolder.replace(/[\\//]+$/,'')}/#{theme}/#{options.viewFolderPattern}"
 
-    routes = modules[moduleName].routes.routes
+      themeTemplates = glob.sync(options.themeDir, @globOptions)
 
-    for urlString, action of routes
-      # you can have multiple urls (comma seperated), like
-      # GET:/home,POST:/home
-      urls = urlString.split(',')
-      for url in urls
-        urlParts = url.match(/^((post|put|get|delete|patch|all|\*)\:)*(.+)$/i)
-        if urlParts
-          # e.g. POST:/about
-          httpMethod = urlParts[2]?.toLowerCase() or 'all'
-          httpMethod = 'all' if httpMethod is options.defaultHTTPMethod
-          urlRule = urlParts[3]
-          # e.g. index.about (index -> code file, about -> method)
-          actionParts = action.match(/^([^\.]+)\.([^\.]+)/)
-          codeFile = actionParts[1]
-          method = actionParts[2]
-          if actionParts and codeFile and method
-            # abort if code file doesnt exists
-            throw Error("Cannot find file '#{codeFile}' for route '#{url}' in module '#{moduleName}'") unless codeFiles[codeFile]
-            if method
-              try
-                app[httpMethod](urlRule, require(options.basedir+'/'+codeFiles[codeFile])[method])
-              catch e
-                throw Error("Cannot find method '#{method}' in file '#{codeFile}' for route '#{url}' in module '#{moduleName}'")
-
-    # apply views
-    viewFiles = glob.sync("#{moduleName}/#{options.viewFolderPattern}")
-    views.push(viewFiles[0]) if viewFiles?.length > 0
-
-    #app.set('views',path.dirname(viewFiles[0])) if viewFiles?.length > 0
-
-    # mount to (parent/main) app
     if mountToApp
-      mountpoint = if @getConfig()[moduleName]?.mountpoint then @getConfig()[moduleName]?.mountpoint else options.defaultMountpoint
-      mountpoint = @_replaceVariableHolder(mountpoint, moduleName)
-      mainApp.use(mountpoint, app)
+      mainApp = instanceMethod()
+    else
+      app = instanceMethod
 
-    views.push(themeTemplates[0]) if themeTemplates?.length > 0
+    # now all routes will be applied to the app
+    # in order of `before:` and `after:`
 
-    app.set('views', views)
+    
+    #@logDebug(@sortedRoutes,  JSON.stringify(modules))
 
-  return if mountToApp
-    mainApp
-  else
-    app
+    for moduleName in @sortedRoutes
+      # if we deal with express instance method
+      # we create a new express / app instance for each module
+      if mountToApp
+        app = instanceMethod()
+        for settingKey of options.expressjs?.set
+          app.set(settingKey, options.expressjs.set[settingKey])
+      
+      views = []
+
+      routes = modules[moduleName].routing.routes
+      codeFiles = {}
+      for file in modules[moduleName].codeFiles
+        #codeFiles[]
+        key = file.replace(/^.*\/([^\\]+?)\.[^\.]+?$/, '$1')
+        if codeFiles[key]
+          throw Error("'#{file}' is an ambigious code file to '#{codeFiles[key]}'; files with identical name are not allowed")
+        codeFiles[key] = file
+
+      routes = modules[moduleName].routing.routes
+
+      for urlString, action of routes
+        # you can have multiple urls (comma seperated), like
+        # GET:/home,POST:/home
+        urls = urlString.split(',')
+        for url in urls
+          urlParts = url.match(/^((post|put|get|delete|patch|all|\*)\:)*(.+)$/i)
+          if urlParts
+            # e.g. POST:/about
+            httpMethod = urlParts[2]?.toLowerCase() or 'all'
+            httpMethod = 'all' if httpMethod is options.defaultHTTPMethod
+            urlRule = urlParts[3]
+            # e.g. index.about (index -> code file, about -> method)
+            actionParts = action.match(/^([^\.]+)\.([^\.]+)/)
+            codeFile = actionParts[1]
+            method = actionParts[2]
+            if actionParts and codeFile and method
+              # abort if code file doesnt exists
+              throw Error("Cannot find file '#{codeFile}' for route '#{url}' in module '#{moduleName}'") unless codeFiles[codeFile]
+              if method
+                try
+                  app[httpMethod](urlRule, require(options.basedir+'/'+codeFiles[codeFile])[method])
+                catch e
+                  throw Error("Cannot find method '#{method}' in file '#{codeFile}' for route '#{url}' in module '#{moduleName}'")
+
+      # apply views
+      viewFiles = glob.sync("#{moduleName}/#{options.viewFolderPattern}", @globOptions)
+      views.push(viewFiles[0]) if viewFiles?.length > 0
+
+      #app.set('views',path.dirname(viewFiles[0])) if viewFiles?.length > 0
+
+      # mount to (parent/main) app
+      if mountToApp
+        mountpoint = if @getConfig()[moduleName]?.mountpoint then @getConfig()[moduleName]?.mountpoint else options.defaultMountpoint
+        mountpoint = @_replaceVariableHolder(mountpoint, moduleName)
+        mainApp.use(mountpoint, app)
+
+      views.push(themeTemplates[0]) if themeTemplates?.length > 0
+
+      app.set('views', views)
+
+    return if mountToApp
+      mainApp
+    else
+      app
+
+
+module.exports = Modulware
+
+  

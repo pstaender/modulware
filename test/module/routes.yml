@@ -3,3 +3,4 @@ routes:
   '/': frontpage.index
   'GET:/contact/:id([0-9]+)': contact.get
   'POST:/contact/:id([0-9]+)': contact.post
+  '/home,GET:/welcome_home': frontpage.home
