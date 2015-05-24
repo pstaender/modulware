@@ -1,4 +1,3 @@
-#require('coffee-script/register')
 assert = require('assert')
 
 express = require('express')
@@ -22,6 +21,7 @@ createServer = (opts = {}) ->
   port ?= testOptions.port
   unless app
     app = express()
+    app.set('view engine', 'jade')
     mw = new Modulware(options, app)
   
   server = app.listen port, ->
@@ -54,6 +54,12 @@ describe 'indexing modules', ->
     app = new express()
     mw = new Modulware(options, app)
 
+  it 'expect to have project configuration', ->
+    app = new express()
+    mw = new Modulware(options, app)
+    assert.equal mw.config.defaultPictureFormat, 'jpg'
+    assert.equal mw.config.project.theme, 'minimal'
+
   it 'expect to start a server with module depending routes', (done) ->
     createServer(
       done: ->
@@ -66,5 +72,9 @@ describe 'indexing modules', ->
             assert.equal(err, null)
             assert.equal(res.statusCode, 200)
             assert.equal(res.body, ':)')
-            done()
+            request.get "#{testOptions.baseHref()}/home", (err, res) ->
+              assert.equal(res.body, """
+                <!DOCTYPE html><html lang="en"><head></head><body><h1>Example Project</h1><h2>philipp.staender@gmail.com</h2></body></html>
+              """.trim())
+              done()
     )

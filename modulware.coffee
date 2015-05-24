@@ -5,19 +5,22 @@ path = require 'path'
 _    = require 'underscore'
 _.mixin(require('underscore.nested'))
 
-doesFileExists = fs.lstatSync
+doesFileExists = (file) ->
+  try
+    fs.lstatSync(file)
+    return true
+  catch e 
+    return null
 
 class Modulware
 
-  config: {
-    themeDir: -> @options.themeDir
-  }
-
+  config         : {}
   options        : {}
   modules        : {}
   i18n           : {}
   sortedRoutes   : []
   globOptions    : {}
+  themeTemplates : []
 
   options: {
     configFilePattern: 'config.@(yml|yaml)'
@@ -40,9 +43,6 @@ class Modulware
     localOptionKey: 'settings.options'
     routesYMLMandatory: true
     verbosity: 0
-    expressjs:
-      set:
-        'view engine': 'jade'
   }
 
   constructor: (options = {}, app = null) ->
@@ -55,7 +55,9 @@ class Modulware
     @sortedRoutes   = _.extend({}, @sortedRoutes)
     @globOptions    = _.extend({}, @globOptions)
     @setOptions(options)
+    @setupConfig()
     @applyOnExpress(app) if typeof app is 'function'
+    @themeTemplates = []
     @
 
   _replaceVariableHolder: (haystack, needle, replacement) ->
@@ -64,6 +66,9 @@ class Modulware
     @_replaceVariableHolder(str, needle, moduleName)
   _replaceThemeVariable: (str, moduleName, needle = 'theme') ->
     @_replaceVariableHolder(str, needle, moduleName)
+
+  setupConfig: ->
+    @config = {}
 
   getOptions: -> @options
 
@@ -82,8 +87,12 @@ class Modulware
     return @logError('instanceMethod argument needs to be a function') if typeof instanceMethod isnt 'function'
     @buildModuleIndex()
     app = @_applyOnInstanceMethod(instanceMethod)
-    _.setNested(app.locals, @options.localConfigKey, @getConfig()) if @options.configOnLocals
-    _.setNested(app.locals, @options.localOptionKey, @getOptions()) if @options.optionsOnLocals
+    #throw Error("app.locals.#{@options.localConfigKey} already has values") if app.locals[@options.localConfigKey]
+    #app.locals[@options.localConfigKey] = @config  if @options.configOnLocals
+    #throw Error("app.locals.#{@options.localOptionKey} already has values") if app.locals[@options.localOptionKey]
+    #app.locals[@options.localOptionKey] = @options if @options.optionsOnLocals
+    _.setNested(app.locals, @options.localOptionKey, @options) if @options.optionsOnLocals
+    _.setNested(app.locals, @options.localConfigKey, @config) if @options.optionsOnLocals
     return app
 
   
@@ -131,9 +140,7 @@ class Modulware
         continue
       if options.routesYMLMandatory
         path = @makePathAbsolute("#{moduleName}/#{options.routesFile}")
-        try
-          doesFileExists(path)
-        catch e
+        unless doesFileExists(path)
           @logVerbose("Skipping module '#{moduleName}' because it doesn't contain a '#{options.routesFile}'") # " ('#{path}') ")
           continue
       
@@ -145,6 +152,18 @@ class Modulware
     modules = @_indexConfigurationFilesOfModules(modules)
     for moduleName in modules
       sortedRoutes.push(moduleName)
+
+    # find themes
+    if options.themesFolder
+      theme = options.theme || @config?.project?.theme || ''
+      @logVerbose "No theme is setup…"
+      theme = theme.replace(/[\\//]+$/,'').replace(/^[\\//]+/,'')
+      themeDir = "#{options.themesFolder.replace(/[\\//]+$/,'')}#{'/'+theme.replace(/[\\//]+$/,'').replace(/[\\//]+$/,'')}"
+      options.themeDir = "#{themeDir}/#{options.viewFolderPattern}"
+      @config.project ?= {}
+      @config.project.themeDir = themeDir
+      @themeTemplates = glob.sync(options.themeDir, @globOptions)
+
     # sort routes
     @sortedRoutes = @_sortRoutes(sortedRoutes, modules)
 
@@ -167,10 +186,7 @@ class Modulware
       module = modules[moduleName]
       routesFilename = "#{moduleName}/#{options.routesFile}"
 
-      try
-        doesFileExists(@makePathAbsolute(routesFilename))
-      catch e
-        moduleRoutes = {}
+      moduleRoutes = {} unless doesFileExists(@makePathAbsolute(routesFilename))
 
       # load routes.yml
       modules[moduleName].routing = {}
@@ -237,14 +253,6 @@ class Modulware
     
     mountToApp = (Boolean) typeof instanceMethod is 'function' and instanceMethod?.name is 'createApplication'
 
-    themeTemplates = []
-    if options.themesFolder
-      theme = options.theme || ''
-      theme = theme.replace(/[\\//]+$/,'').replace(/^[\\//]+/,'')
-      options.themeDir = "#{options.themesFolder.replace(/[\\//]+$/,'')}/#{theme}/#{options.viewFolderPattern}"
-
-      themeTemplates = glob.sync(options.themeDir, @globOptions)
-
     if mountToApp
       mainApp = instanceMethod()
     else
@@ -253,16 +261,10 @@ class Modulware
     # now all routes will be applied to the app
     # in order of `before:` and `after:`
 
-    
-    #@logDebug(@sortedRoutes,  JSON.stringify(modules))
-
     for moduleName in @sortedRoutes
       # if we deal with express instance method
       # we create a new express / app instance for each module
-      if mountToApp
-        app = instanceMethod()
-        for settingKey of options.expressjs?.set
-          app.set(settingKey, options.expressjs.set[settingKey])
+      app = instanceMethod() if mountToApp
       
       views = []
 
@@ -303,9 +305,7 @@ class Modulware
 
       # apply views
       viewFiles = glob.sync("#{moduleName}/#{options.viewFolderPattern}", @globOptions)
-      views.push(viewFiles[0]) if viewFiles?.length > 0
-
-      #app.set('views',path.dirname(viewFiles[0])) if viewFiles?.length > 0
+      views.push(@makePathAbsolute(viewFiles[0])) if viewFiles?.length > 0
 
       # mount to (parent/main) app
       if mountToApp
@@ -313,8 +313,7 @@ class Modulware
         mountpoint = @_replaceVariableHolder(mountpoint, moduleName)
         mainApp.use(mountpoint, app)
 
-      views.push(themeTemplates[0]) if themeTemplates?.length > 0
-
+      views.push(@makePathAbsolute(@themeTemplates[0])) if @themeTemplates?.length > 0
       app.set('views', views)
 
     return if mountToApp

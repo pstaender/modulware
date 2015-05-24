@@ -6,5 +6,9 @@ mymodule:
   name: mymoduel
   author: me@home.com
   mountpoint: /
+project:
+  name: Example Project
+  author: philipp.staender@gmail.com
+  theme: 'minimal'
 # all values will be merged to one big config file
 # and are accessible via `modulware.getConfig()`

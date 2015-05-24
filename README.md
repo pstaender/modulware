@@ -1,6 +1,8 @@
 # Modulware - Middleware for modules
 ## … helps you to organize modular stuff via subfolders in your webapplication
 
+[![Build Status](https://api.travis-ci.org/pstaender/modulware.png)](https://travis-ci.org/pstaender/modulware)
+
 Wording attention: Here module(s) **are not** the libraries you usually find in `node_modules`! In our case modules are folders including code, config, routes and translation data for your webapplication. They should keep your project more modular and organized… you could also regard them as plugins.
 
 ## Example
@@ -46,14 +48,10 @@ Since it's a middleware, you have to combine it with frameworks. For now it work
 ```coffeescript
 express = require('express')
 app = express()
+app.set('view engine', 'jade')
 
-modulware = require('modulware')()
-# or with options if you want to override the default settings (see: https://github.com/pstaender/modulware/blob/master/modulware.coffee#L7)
-# options = { defaultHTTPMethod: 'GET'}
-modulware.applyMethods(app)
-app.locals.config = modulware.getConfig()
-translation = modulware.getI18N()
-
+Modulware = require('modulware')
+mw = new Modulware(app)
 server = app.listen 3000, ->
   console.log('server is running')
 ```
@@ -64,7 +62,10 @@ Early alpha, not ready for production. Tested against the latest `expressjs` fra
 
 ## Tests
 
-Maybe later…
+```sh
+  $ npm install .
+  $ mocha
+```
 
 ## License
 
